@@ -1,0 +1,79 @@
+import pysam
+from tqdm import tqdm
+
+def calculate_mixing_ratio(file_path):
+    nucleotides = {'A': 0, 'T': 0, 'G': 0, 'C': 0}
+    position_counts = []
+    total_columns = 0
+    reads_involved = []  # Define and initialize reads_involved list
+
+    with pysam.AlignmentFile(file_path, "rb") as bamfile:
+        for pileupcolumn in bamfile.pileup(max_depth=1483647):
+            position_count = {'A': 0, 'T': 0, 'G': 0, 'C': 0}
+            for pileupread in pileupcolumn.pileups:
+                if not pileupread.is_del and not pileupread.is_refskip:
+                    base = pileupread.alignment.query_sequence[pileupread.query_position]
+                    if base.upper() in nucleotides:
+                        position_count[base.upper()] += 1
+            if sum(position_count.values()) > 100:
+                position_counts.append(position_count)
+                total_columns += 1
+                reads_involved.append(sum(position_count.values()))  # Update reads_involved list
+
+    mixing_ratios = {nucleotide: [round(position_count[nucleotide] / sum(position_count.values()) * 100, 3) 
+                                  for position_count in position_counts] 
+                     for nucleotide in nucleotides}
+    return mixing_ratios, total_columns, reads_involved
+
+def save_results_to_notepad(mixing_ratios, reads_involved, single_nucleotide_regions, total_columns, variant_region_count, percentage_variant_regions, average_max_percentage, output_file):
+    with open(output_file, 'w') as file:
+        file.write("Position\tA\tT\tG\tC\tReads Involved\n")
+        for i, ratios in enumerate(zip(mixing_ratios['A'], mixing_ratios['T'], mixing_ratios['G'], mixing_ratios['C'], reads_involved), start=1):
+            file.write(f"{i}\t{ratios[0]}\t{ratios[1]}\t{ratios[2]}\t{ratios[3]}\t{ratios[4]}\n")
+
+        file.write("\n")
+        file.write(f"Number of single nucleotide regions: {len(single_nucleotide_regions)}\n")
+        file.write(f"Percentage of genome covered by single nucleotide regions: {calculate_single_nucleotide_region_percentage(single_nucleotide_regions, total_columns)}%\n")
+        file.write(f"Number of variant nucleotide regions: {variant_region_count}\n")
+        file.write(f"Percentage of genome covered by variant nucleotide regions: {percentage_variant_regions}%\n")
+        file.write(f"Average maximum nucleotide percentage: {average_max_percentage:.3f}%\n")
+
+def find_single_nucleotide_regions(mixing_ratios):
+    single_nucleotide_regions = []
+    for i, (a, t, g, c) in enumerate(zip(mixing_ratios['A'], mixing_ratios['T'], mixing_ratios['G'], mixing_ratios['C']), start=1):
+        if a == 100 and t == 0 and g == 0 and c == 0 or \
+           t == 100 and a == 0 and g == 0 and c == 0 or \
+           g == 100 and a == 0 and t == 0 and c == 0 or \
+           c == 100 and a == 0 and t == 0 and g == 0:
+            single_nucleotide_regions.append(i)
+    return single_nucleotide_regions
+
+def calculate_single_nucleotide_region_percentage(single_nucleotide_regions, total_columns):
+    return round(len(single_nucleotide_regions) / total_columns * 100, 3)
+
+def calculate_variant_regions(single_nucleotide_regions, total_columns):
+    variant_region_count = total_columns - len(single_nucleotide_regions)
+    return variant_region_count, round(variant_region_count / total_columns * 100, 3)
+
+def calculate_max_nucleotide_percentage_average(mixing_ratios):
+    max_percentages = []
+    for i in range(len(mixing_ratios['A'])):
+        max_percentage = max(mixing_ratios['A'][i], mixing_ratios['T'][i], mixing_ratios['G'][i], mixing_ratios['C'][i])
+        max_percentages.append(max_percentage)
+    average_max_percentage = sum(max_percentages) / len(max_percentages)
+    return average_max_percentage
+
+def main():
+    bam_file_path = ''  # Modify this path to your BAM file location
+    mixing_ratios, total_columns, reads_involved = calculate_mixing_ratio(sam_bam_file_path)
+
+    single_nucleotide_regions = find_single_nucleotide_regions(mixing_ratios)
+    variant_region_count, percentage_variant_regions = calculate_variant_regions(single_nucleotide_regions, total_columns)
+    average_max_percentage = calculate_max_nucleotide_percentage_average(mixing_ratios)
+
+    output_file = ''  # Modify this path to your output file location
+    save_results_to_notepad(mixing_ratios, reads_involved, single_nucleotide_regions, total_columns, variant_region_count, percentage_variant_regions, average_max_percentage, output_file)
+    print(f"Results saved to {output_file}")
+
+if __name__ == "__main__":
+    main()
