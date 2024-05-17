@@ -1,0 +1,69 @@
+import pysam
+from tqdm import tqdm
+import re  
+
+sam_bam_file_path = '' # Modify this path to your BAM file location
+output_file = '' # Modify this path to your output file location
+
+# BAM 파일에 대한 인덱스 생성
+pysam.index(sam_bam_file_path)
+
+
+
+# MD 태그의 불일치를 계산
+def count_mismatches_from_md_tag(md_tag):
+    substitution_count = 0
+    in_deletion = False
+
+    for char in md_tag:
+        if char.isdigit():
+            in_deletion = False
+        elif char == '^':
+            in_deletion = True
+        else:
+            if not in_deletion:
+                substitution_count += 1
+
+    return substitution_count
+
+# CIGAR 문자열에서 숫자를 추출하여 삽입과 삭제 합산
+def sum_lengths_from_cigar(cigar_str, operation):
+    return sum(int(num) for num in re.findall(r'(\d+)' + operation, cigar_str))
+
+# 파일 처리 및 CIGAR 정보 분석
+with pysam.AlignmentFile(sam_bam_file_path, "rb") as samfile, open(output_file, 'w') as f_out:
+    
+    processed_reads = 0
+    total_nucleotide_count = 0
+    substitution_count = 0
+    insertion_count = 0
+    deletion_count = 0
+
+    for read in tqdm(samfile.fetch(), desc="Processing reads", unit="read", total=samfile.count()):
+
+
+        processed_reads += 1
+
+        cigar_str = read.cigarstring
+        insertion_count += sum_lengths_from_cigar(cigar_str, 'I')
+        deletion_count += sum_lengths_from_cigar(cigar_str, 'D')
+
+        
+        total_nucleotide_count += read.query_length
+
+        if read.has_tag('MD'):
+            md_tag = read.get_tag('MD')
+            substitution_count += count_mismatches_from_md_tag(md_tag)
+
+    variant_nucleotide_count = substitution_count + insertion_count + deletion_count
+    variant_frequency = (variant_nucleotide_count / total_nucleotide_count) * 100 if total_nucleotide_count > 0 else 0
+
+    f_out.write(f"Total reads processed: {processed_reads}\n")
+    f_out.write(f"Total nucleotide count: {total_nucleotide_count}\n")
+    f_out.write(f"Insertion count: {insertion_count}\n")
+    f_out.write(f"Deletion count: {deletion_count}\n")
+    f_out.write(f"Substitution count: {substitution_count}\n")
+    f_out.write(f"Variant nucleotide count: {variant_nucleotide_count}\n")
+    f_out.write(f"Variant frequency: {variant_frequency:.3f}%\n")
+
+print(f"Results saved to {output_file}")
